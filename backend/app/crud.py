@@ -40,9 +40,15 @@ async def create_note(title: str, content: str, owner_id: str, owner_username: s
     note_doc["_id"] = result.inserted_id
     return NoteDB(**note_doc)
 
-async def update_note(note_id: str, title: Optional[str], content: Optional[str]) -> Optional[NoteDB]:
+async def update_note(
+    note_id: str,
+    title: Optional[str],
+    content: Optional[str],
+    base_updated_at: Optional[datetime] = None,
+) -> Optional[NoteDB]:
     if not ObjectId.is_valid(note_id):
         return None
+
     update_data = {}
     if title is not None:
         update_data["title"] = title
@@ -50,12 +56,28 @@ async def update_note(note_id: str, title: Optional[str], content: Optional[str]
         update_data["content"] = content
     if not update_data:
         return await get_note_by_id(note_id)
-        
-    update_data["updated_at"] = datetime.now(timezone.utc)
-    await notes_collection.update_one(
-        {"_id": ObjectId(note_id)},
+
+    now = datetime.now(timezone.utc)
+    update_data["updated_at"] = now
+
+    filter_query = {"_id": ObjectId(note_id)}
+    if base_updated_at is not None:
+        if isinstance(base_updated_at, str):
+            try:
+                base_updated_at = datetime.fromisoformat(base_updated_at.replace("Z", "+00:00"))
+            except ValueError:
+                base_updated_at = None
+        if base_updated_at is not None:
+            filter_query["updated_at"] = base_updated_at
+
+    result = await notes_collection.update_one(
+        filter_query,
         {"$set": update_data}
     )
+
+    if base_updated_at is not None and result.matched_count == 0:
+        return None
+
     return await get_note_by_id(note_id)
 
 async def delete_note(note_id: str) -> bool:

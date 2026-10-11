@@ -11,7 +11,7 @@ from app.database import init_db, users_collection
 from app.auth import get_password_hash, verify_password, create_access_token, get_current_user
 from app.models import UserDB
 from app.schemas import UserRegister, UserLogin, UserOut, Token, NoteCreate, NoteUpdate, NoteShare, NoteOut
-from app.sockets import sio
+from app.sockets import sio, emit_to_user
 import app.crud as crud
 
 app = FastAPI(title="Collaborative Notes Studio API")
@@ -143,21 +143,31 @@ async def update_existing_note(note_id: str, note_in: NoteUpdate, current_user: 
     note = await crud.get_note_by_id(note_id)
     if not note:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
-        
+
     # Enforce edit permission boundaries
     is_owner = note.owner_id == str(current_user.id)
     collab = next((col for col in note.collaborators if col.user_id == str(current_user.id)), None)
     is_collab_editor = collab is not None and collab.role == "edit"
-    
+
     if not (is_owner or is_collab_editor):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No edit permission")
-        
-    updated_note = await crud.update_note(note_id, title=note_in.title, content=note_in.content)
-    
+
+    updated_note = await crud.update_note(
+        note_id,
+        title=note_in.title,
+        content=note_in.content,
+        base_updated_at=note_in.base_updated_at,
+    )
+    if updated_note is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This note was updated by another user. Refresh and try again.",
+        )
+
     # Broadcast updated note structure to note subscribers
     serialized = serialize_note(updated_note)
     await sio.emit("note_updated", serialized, room=f"note_{note_id}")
-    
+
     return NoteOut.model_validate(updated_note)
 
 @app.delete("/api/notes/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -209,6 +219,7 @@ async def share_note(note_id: str, share_in: NoteShare, current_user: UserDB = D
     # Emit note update to sync any open clients
     serialized = serialize_note(updated_note)
     await sio.emit("note_updated", serialized, room=f"note_{note_id}")
+    await emit_to_user(str(collab_user.id), "note_shared", serialized)
     return NoteOut.model_validate(updated_note)
 
 @app.post("/api/notes/{note_id}/unshare", response_model=NoteOut)
@@ -226,6 +237,7 @@ async def unshare_note(note_id: str, user_id_in: dict, current_user: UserDB = De
         
     # Notify target user client to close their editor view immediately
     await sio.emit("user_unshared", {"user_id": target_user_id, "note_id": note_id}, room=f"note_{note_id}")
+    await emit_to_user(target_user_id, "user_unshared", {"user_id": target_user_id, "note_id": note_id})
 
     updated_note = await crud.remove_collaborator(note_id, target_user_id)
     

@@ -10,6 +10,31 @@ logger.setLevel(logging.INFO)
 
 # Create an async Socket.IO server allowing all CORS origins for testing/development
 sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')
+user_sockets = {}
+
+
+def register_user_socket(user_id: str, sid: str):
+    if not user_id:
+        return
+    user_sockets.setdefault(str(user_id), set()).add(sid)
+
+
+def unregister_user_socket(user_id: str, sid: str):
+    if not user_id:
+        return
+    sockets = user_sockets.get(str(user_id))
+    if not sockets:
+        return
+    sockets.discard(sid)
+    if not sockets:
+        user_sockets.pop(str(user_id), None)
+
+
+async def emit_to_user(user_id: str, event: str, payload):
+    sockets = user_sockets.get(str(user_id), set())
+    for sid in list(sockets):
+        await sio.emit(event, payload, room=sid)
+
 
 @sio.event
 async def connect(sid, environ, auth):
@@ -33,7 +58,9 @@ async def connect(sid, environ, auth):
             return False
             
         # Store user details in socket session for quick retrieval in event handlers
-        await sio.save_session(sid, {"user_id": str(user.id), "username": user.username})
+        user_id = str(user.id)
+        await sio.save_session(sid, {"user_id": user_id, "username": user.username})
+        register_user_socket(user_id, sid)
         logger.info(f"Socket {sid} authenticated as {user.username}")
         return True
     except Exception as e:
@@ -41,8 +68,17 @@ async def connect(sid, environ, auth):
         return False
 
 @sio.event
-async def disconnect(sid):
-    logger.info(f"Socket disconnected: {sid}")
+async def disconnect(sid, reason=None):
+    try:
+        session = await sio.get_session(sid)
+    except Exception:
+        session = {}
+
+    if session:
+        user_id = session.get("user_id")
+        unregister_user_socket(user_id, sid)
+
+    logger.info(f"Socket disconnected: {sid} ({reason})")
 
 @sio.event
 async def join_note(sid, data):
@@ -96,32 +132,38 @@ async def edit_note(sid, data):
     note_id = data.get("note_id")
     title = data.get("title")
     content = data.get("content")
-    
+    base_updated_at = data.get("base_updated_at")
+
     if not note_id:
         return {"status": "error", "message": "Missing note_id"}
-        
+
     session = await sio.get_session(sid)
     user_id = session.get("user_id")
-    
+
     note = await get_note_by_id(note_id)
     if not note:
         return {"status": "error", "message": "Note not found"}
-        
+
     # Enforce edit permission boundaries
     is_owner = note.owner_id == user_id
     collab = next((col for col in note.collaborators if col.user_id == user_id), None)
     is_collab_editor = collab is not None and collab.role == "edit"
-    
+
     if not (is_owner or is_collab_editor):
         return {"status": "error", "message": "No edit permission"}
-        
+
     import app.crud as crud
-    updated_note = await crud.update_note(note_id, title=title, content=content)
-    if not updated_note:
-        return {"status": "error", "message": "Failed to update note"}
-        
+    updated_note = await crud.update_note(
+        note_id,
+        title=title,
+        content=content,
+        base_updated_at=base_updated_at,
+    )
+    if updated_note is None:
+        return {"status": "error", "message": "This note was updated by another user. Refresh and try again."}
+
     # Broadcast updated note structure to other room subscribers
     serialized = json.loads(NoteOut.model_validate(updated_note).model_dump_json())
     await sio.emit("note_updated", serialized, room=f"note_{note_id}", skip_sid=sid)
-    
+
     return {"status": "ok", "note": serialized}

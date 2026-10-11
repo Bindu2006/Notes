@@ -15,6 +15,8 @@ export interface Note {
   owner_id: string;
   owner_username: string;
   collaborators: Collaborator[];
+  created_at: string;
+  updated_at: string;
 }
 
 interface ShareModalProps {

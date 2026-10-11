@@ -5,9 +5,9 @@ import { Navbar } from "../components/Navbar";
 import { EditNote } from "../components/EditNote";
 import { ShareModal } from "../components/ShareModal";
 import type { Note } from "../components/ShareModal";
-import { 
-  Plus, BookOpen, User, Users, ChevronRight, AlertCircle, 
-  FileText, Shield, Clock, LayoutGrid, Award, FolderHeart
+import {
+  Plus, BookOpen, Users, ChevronRight, AlertCircle,
+  FileText, Clock, LayoutGrid, FolderHeart,
 } from "lucide-react";
 
 type ThemeName = "nebula" | "emerald" | "amber";
@@ -144,6 +144,18 @@ export const Dashboard: React.FC = () => {
       setActiveNote((prev) => (prev && prev.id === note_id ? null : prev));
     };
 
+    const handleNoteShared = (sharedNote: Note) => {
+      setNotes((prevNotes) => {
+        const index = prevNotes.findIndex((n) => n.id === sharedNote.id);
+        if (index !== -1) {
+          const updated = [...prevNotes];
+          updated[index] = sharedNote;
+          return updated.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+        }
+        return [sharedNote, ...prevNotes].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+      });
+    };
+
     const handleRemoteUnshare = ({ user_id, note_id }: { user_id: string; note_id: string }) => {
       if (user_id === user?.id) {
         setNotes((prev) => prev.filter((n) => n.id !== note_id));
@@ -158,6 +170,7 @@ export const Dashboard: React.FC = () => {
     };
 
     socket.on("note_updated", handleRemoteUpdate);
+    socket.on("note_shared", handleNoteShared);
     socket.on("note_deleted", handleRemoteDelete);
     socket.on("user_unshared", handleRemoteUnshare);
 
@@ -165,6 +178,7 @@ export const Dashboard: React.FC = () => {
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
       socket.off("note_updated", handleRemoteUpdate);
+      socket.off("note_shared", handleNoteShared);
       socket.off("note_deleted", handleRemoteDelete);
       socket.off("user_unshared", handleRemoteUnshare);
     };

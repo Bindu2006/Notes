@@ -38,6 +38,7 @@ class NoteCreate(BaseModel):
 class NoteUpdate(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
+    base_updated_at: Optional[datetime] = None
 
 class NoteShare(BaseModel):
     collaborator_identifier: str = Field(..., description="Username or Email of the collaborator")

@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
-import type { Note, Collaborator } from "./ShareModal";
+import type { Note } from "./ShareModal";
 import { useAuth } from "../context/AuthContext";
 import { useSocket } from "../context/SocketContext";
-import { 
-  Save, Eye, Edit2, Share2, Trash2, Clock, Shield, 
-  Bold, Italic, Heading1, Heading2, List, Code, CheckCircle, AlertTriangle 
+import {
+  Save, Eye, Edit2, Share2, Trash2, Shield, AlertTriangle,
+  Bold, Italic, Heading1, Heading2, List, Code,
 } from "lucide-react";
 
 interface EditNoteProps {
@@ -21,8 +21,6 @@ interface EditNoteProps {
   };
 }
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
-
 export const EditNote: React.FC<EditNoteProps> = ({
   note,
   onUpdateNote,
@@ -30,7 +28,7 @@ export const EditNote: React.FC<EditNoteProps> = ({
   onShareClick,
   themeStyles
 }) => {
-  const { token, user } = useAuth();
+  const { user } = useAuth();
   const socket = useSocket();
 
   const [title, setTitle] = useState(note.title);
@@ -40,7 +38,11 @@ export const EditNote: React.FC<EditNoteProps> = ({
   const [viewMode, setViewMode] = useState<"edit" | "preview">("edit");
   const [focusedField, setFocusedField] = useState<"title" | "content" | null>(null);
 
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isOwner = note.owner_id === user?.id;
+  const userRole = note.collaborators.find((c) => c.user_id === user?.id)?.role;
+  const canEdit = isOwner || userRole === "edit";
+
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Sync internal states when selected note changes
@@ -50,10 +52,6 @@ export const EditNote: React.FC<EditNoteProps> = ({
     setLastSaved(new Date(note.updated_at));
     setViewMode("edit");
   }, [note.id]);
-
-  const isOwner = note.owner_id === user?.id;
-  const userRole = note.collaborators.find((c) => c.user_id === user?.id)?.role;
-  const canEdit = isOwner || userRole === "edit";
 
   // Socket sync
   useEffect(() => {
@@ -102,15 +100,20 @@ export const EditNote: React.FC<EditNoteProps> = ({
         return;
       }
 
-      socket.emit("edit_note", { note_id: note.id, title, content }, (response: any) => {
-        if (response && response.status === "ok") {
-          onUpdateNote(response.note);
-          setLastSaved(new Date(response.note.updated_at));
-        } else {
-          console.error("Autosave error:", response?.message);
+      socket.emit(
+        "edit_note",
+        { note_id: note.id, title, content, base_updated_at: note.updated_at },
+        (response: any) => {
+          if (response && response.status === "ok") {
+            onUpdateNote(response.note);
+            setLastSaved(new Date(response.note.updated_at));
+          } else {
+            console.error("Autosave error:", response?.message);
+            window.alert("This note changed elsewhere while you were editing. Refresh the note to avoid overwriting someone else’s changes.");
+          }
+          setIsSaving(false);
         }
-        setIsSaving(false);
-      });
+      );
     }, 750);
 
     return () => {
@@ -123,15 +126,20 @@ export const EditNote: React.FC<EditNoteProps> = ({
     if (!socket) return;
 
     setIsSaving(true);
-    socket.emit("edit_note", { note_id: note.id, title, content }, (response: any) => {
-      if (response && response.status === "ok") {
-        onUpdateNote(response.note);
-        setLastSaved(new Date(response.note.updated_at));
-      } else {
-        console.error("Save error:", response?.message);
+    socket.emit(
+      "edit_note",
+      { note_id: note.id, title, content, base_updated_at: note.updated_at },
+      (response: any) => {
+        if (response && response.status === "ok") {
+          onUpdateNote(response.note);
+          setLastSaved(new Date(response.note.updated_at));
+        } else {
+          console.error("Save error:", response?.message);
+          window.alert("This note changed elsewhere while you were editing. Refresh the note to avoid overwriting someone else’s changes.");
+        }
+        setIsSaving(false);
       }
-      setIsSaving(false);
-    });
+    );
   };
 
   // Helper to inject markdown wrappers at cursor selection point
