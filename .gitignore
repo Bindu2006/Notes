@@ -18,6 +18,8 @@ frontend/dist-ssr/
 # Logs and generated artifacts
 *.log
 .dist/
+/openapi_old.json
+/openapi_new.json
 
 # Editor and operating system files
 .vscode/
@@ -25,7 +27,5 @@ frontend/dist-ssr/
 .DS_Store
 Thumbs.db
 
-# Keep these project artifacts available to commit
-!/openapi_old.json
-!/openapi_new.json
+# Keep the project explanation available to commit
 !/PROJECT_EXPLANATION.md
