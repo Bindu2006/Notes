@@ -20,6 +20,7 @@ frontend/dist-ssr/
 .dist/
 /openapi_old.json
 /openapi_new.json
+/PROJECT_EXPLANATION.md
 
 # Editor and operating system files
 .vscode/
@@ -27,5 +28,3 @@ frontend/dist-ssr/
 .DS_Store
 Thumbs.db
 
-# Keep the project explanation available to commit
-!/PROJECT_EXPLANATION.md
